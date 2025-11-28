@@ -60,14 +60,24 @@ class DirectionReconstructionWithKappa(StandardLearnedTask):
     ]
     nb_inputs = 3
 
-    def _forward(self, x: Tensor) -> Tensor:
-        # Transform outputs to angle and prepare prediction
-        kappa = torch.linalg.vector_norm(x, dim=1) + eps_like(x)
-        vec_x = x[:, 0] / kappa
-        vec_y = x[:, 1] / kappa
-        vec_z = x[:, 2] / kappa
-        return torch.stack((vec_x, vec_y, vec_z, kappa), dim=1)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.head = torch.nn.Linear(self.nb_inputs, 4)
 
+    def _forward(self, x: Tensor) -> Tensor:
+        # raw output
+        raw = self.head(x)   # shape [N, 4]
+
+        # first 3 are direction logits → normalize
+        dir_raw = raw[:, :3]
+        kappa_raw = raw[:, 3:4]
+
+        dir_norm = dir_raw / (torch.linalg.vector_norm(dir_raw, dim=1, keepdim=True) + 1e-8)
+
+        # ensure positive kappa
+        kappa = torch.nn.functional.softplus(kappa_raw)
+
+        return torch.cat([dir_norm, kappa], dim=1)
 
 class ZenithReconstruction(StandardLearnedTask):
     """Reconstructs zenith angle."""
@@ -111,7 +121,6 @@ class EnergyReconstruction(StandardLearnedTask):
         # Transform, thereby preventing overflow and underflow error.
         return torch.nn.functional.softplus(x, beta=0.05) + eps_like(x)
 
-
 class EnergyReconstructionWithPower(StandardLearnedTask):
     """Reconstructs energy."""
 
@@ -148,18 +157,27 @@ class EnergyTCReconstruction(StandardLearnedTask):
 class EnergyReconstructionWithUncertainty(EnergyReconstruction):
     """Reconstructs energy and associated uncertainty (log(var))."""
 
-    # Requires one feature in addition to `EnergyReconstruction`:
-    # log-variance (uncertainty).
+    # Requires one feature: untransformed energy
     default_target_labels = ["energy"]
-    default_prediction_labels = ["energy_pred", "energy_sigma"]
-    nb_inputs = 2
+    default_prediction_labels = ["energy_mu_pred", "energy_logsigma_pred"]
+    nb_inputs = 1
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # Learnable linear layer: input → 1 output (log_sigma)
+        self.log_sigma_layer = torch.nn.Linear(self.nb_inputs, 1)
 
     def _forward(self, x: Tensor) -> Tensor:
-        # Transform energy
-        energy = super()._forward(x[:, :1]).squeeze(1)
-        log_var = x[:, 1]
-        pred = torch.stack((energy, log_var), dim=1)
-        return pred
+        # Transform to positive energy domain avoiding `-inf` in `log10`
+        #mu = torch.nn.functional.softplus(x, beta=0.05) + eps_like(x)
+        mu = x
+
+        # Predict log_sigma
+        log_sigma = self.log_sigma_layer(x)   # shape [N, 1]
+
+        # Concatenate mu and log_sigma -> shape [N, 2]
+        return torch.cat([mu, log_sigma], dim=1)
 
 
 class VertexReconstruction(StandardLearnedTask):
@@ -204,6 +222,34 @@ class PositionReconstruction(StandardLearnedTask):
 
         return x
 
+class PositionReconstructionWithUncertainty(StandardLearnedTask):
+    """Reconstructs vertex position."""
+
+    # Requires three features, x, y, and z.
+    default_target_labels = ["position"]
+    default_prediction_labels = [
+        "position_x_pred",
+        "position_y_pred",
+        "position_z_pred",
+        "position_x_logsigma_pred",
+        "position_y_logsigma_pred",
+        "position_z_logsigma_pred",
+    ]
+    nb_inputs = 3
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Add a small linear layer to predict log_sigma from hidden representation
+        self.log_sigma_layer = torch.nn.Linear(self.nb_inputs, 3)
+
+    def _forward(self, x: Tensor) -> Tensor:
+        mu = x
+
+        # Predict log_sigma
+        log_sigma = self.log_sigma_layer(x)  # shape [N, 3]
+
+        # Concatenate mu and log_sigma -> shape [N, 6]
+        return torch.cat([mu, log_sigma], dim=1)
 
 class TimeReconstruction(StandardLearnedTask):
     """Reconstructs time."""

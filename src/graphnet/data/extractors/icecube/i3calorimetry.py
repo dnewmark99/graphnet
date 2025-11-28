@@ -13,7 +13,7 @@ if has_icecube_package() or TYPE_CHECKING:
     from icecube import (
         icetray,
         dataclasses,
-        MuonGun,
+        #MuonGun,
     )  # pyright: reportMissingImports=false
 
 

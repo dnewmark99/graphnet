@@ -285,6 +285,62 @@ class LogCMK(torch.autograd.Function):
             * torch.from_numpy(grads).to(grad_output.device).type(dtype),
         )
 
+class GaussianNDLoss(LossFunction):
+    """General class for calculating Gaussian negative log-likelihood loss.
+
+    Requires implementation for specific dimension `m` in which the target and
+    prediction vectors need to be prepared.
+    """
+
+    def __init__(self, reduction: str = "none"):
+        super().__init__()
+        self._nll = torch.nn.GaussianNLLLoss(reduction="none", full=False)
+
+    def _evaluate(self, mu: Tensor, sigma: Tensor, target: Tensor) -> Tensor:
+        """Compute elementwise Gaussian NLL.
+
+        Args:
+            mu: Mean predictions, shape [N, D]
+            sigma: stddev predictions, shape [N, D]  (NOT variance!)
+            target: truth, shape [N, D]
+
+        Returns:
+            [N] loss values
+        """
+        # GaussianNLLLoss expects variance, so convert:
+        var = sigma ** 2
+
+        # returns shape [N, D]
+        loss_per_dim = self._nll(mu, target, var)
+
+        # Sum across dims: [N, D] -> [N]
+        return loss_per_dim.sum(dim=1)
+
+    @abstractmethod
+    def _forward(self, prediction: Tensor, target: Tensor) -> Tensor:
+        raise NotImplementedError
+
+class Gaussian1DLoss(GaussianNDLoss):
+    """Gaussian NLL for 1D targets with learned uncertainty."""
+
+    def _forward(self, prediction: Tensor, target: Tensor) -> Tensor:
+        # prediction: [N, 2] -> [mu, log_sigma]
+        target = target.reshape(-1, 1)
+        assert prediction.dim() == 2 and prediction.size(1) == 2
+        mu = prediction[:, 0:1]
+        sigma = torch.exp(prediction[:, 1:2])
+        return self._evaluate(mu, sigma, target)
+
+class Gaussian3DLoss(GaussianNDLoss):
+    """Gaussian NLL for 3D targets with learned uncertainty."""
+
+    def _forward(self, prediction: Tensor, target: Tensor) -> Tensor:
+        # prediction: [N, 6] -> [mu_x, mu_y, mu_z, log_sigma_x, log_sigma_y, log_sigma_z]
+        target = target.reshape(-1, 3)
+        assert prediction.dim() == 2 and prediction.size(1) == 6
+        mu = prediction[:, 0:3]
+        sigma = torch.exp(prediction[:, 3:6])
+        return self._evaluate(mu, sigma, target)
 
 class VonMisesFisherLoss(LossFunction):
     """General class for calculating von Mises-Fisher loss.

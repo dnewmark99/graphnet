@@ -18,7 +18,7 @@ if has_icecube_package() or TYPE_CHECKING:
         icetray,
         phys_services,
         dataio,
-        LeptonInjector,
+        #LeptonInjector,
     )  # pyright: reportMissingImports=false
 
 

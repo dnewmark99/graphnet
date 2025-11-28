@@ -299,7 +299,8 @@ class ParquetDataset(Dataset):
             else:
                 array = data.to_numpy()
         else:
-            array = np.array()
+            print( f"Empty slice: file_idx={file_idx}, " f"sequential_index={sequential_index}, " f"row_id={row_id}, " f"len_original_df={len(self._file_cache[table][file_idx])}" )
+            array = np.array([])
         return array
 
     def _load_table(self, table_name: str, file_idx: int) -> None:

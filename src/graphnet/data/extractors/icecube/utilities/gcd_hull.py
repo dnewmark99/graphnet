@@ -8,10 +8,10 @@ import numpy as np
 
 from graphnet.utilities.imports import has_icecube_package
 
-if has_icecube_package() or TYPE_CHECKING:
-    from icecube import (
-        MuonGun,
-    )  # pyright: reportMissingImports=false
+#if has_icecube_package() or TYPE_CHECKING:
+    #from icecube import (
+    #    #MuonGun,
+    #)  # pyright: reportMissingImports=false
 
 
 class GCD_hull(ConvexHull):
