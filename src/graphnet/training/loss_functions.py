@@ -141,7 +141,7 @@ class CrossEntropyLoss(LossFunction):
         self._options = options
         self._nb_classes: int
         if isinstance(self._options, int):
-            assert self._options in [torch.int32, torch.int64]
+            #assert self._options in [torch.int32, torch.int64]
             assert (
                 self._options >= 2
             ), f"Minimum of two classes required. Got {self._options}."
@@ -214,6 +214,17 @@ class BinaryCrossEntropyLoss(LossFunction):
             prediction.float(), target.float(), reduction="none"
         )
 
+class BinaryCrossEntropyWithLogitsLoss(LossFunction):
+    """Binary classification loss using logits (AMP-safe)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._loss = torch.nn.BCEWithLogitsLoss(reduction="none")
+
+    def _forward(self, prediction: Tensor, target: Tensor) -> Tensor:
+        # prediction: raw logits, shape [N, 1] or [N]
+        # target: float tensor 0.0 or 1.0
+        return self._loss(prediction.float(), target.float())
 
 class LogCMK(torch.autograd.Function):
     """MIT License.

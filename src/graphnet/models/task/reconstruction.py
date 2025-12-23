@@ -170,8 +170,7 @@ class EnergyReconstructionWithUncertainty(EnergyReconstruction):
 
     def _forward(self, x: Tensor) -> Tensor:
         # Transform to positive energy domain avoiding `-inf` in `log10`
-        #mu = torch.nn.functional.softplus(x, beta=0.05) + eps_like(x)
-        mu = x
+        mu = torch.nn.functional.softplus(x, beta=0.05) + eps_like(x)
 
         # Predict log_sigma
         log_sigma = self.log_sigma_layer(x)   # shape [N, 1]
