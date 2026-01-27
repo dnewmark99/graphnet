@@ -79,10 +79,10 @@ class I3InferenceModule(DeploymentModule):
         for i3_extractor in self._i3_extractors:
             i3_extractor.set_gcd(i3_file="", gcd_file=self._gcd_file)
 
-    def __call__(self, frame: I3Frame) -> bool:
+    def __call__(self, frame_cache: [I3Frame]) -> bool:
         """Write predictions from model to frame."""
         # inference
-        data = self._create_data_representation(frame=frame)
+        data = self._create_data_representation(frame_cache=frame_cache)
         predictions = self._apply_model(data=data)
 
         # Check dimensions of predictions and prediction columns
@@ -92,7 +92,7 @@ class I3InferenceModule(DeploymentModule):
         data = self._create_dictionary(dim=dim, predictions=predictions)
 
         # Submit Dictionary to frame
-        frame = self._add_to_frame(frame=frame, data=data)
+        frame_cache = self._add_to_frame(frame_cache=frame_cache, data_list=data)
         return True
 
     def _check_dimensions(self, predictions: np.ndarray) -> int:
@@ -108,26 +108,19 @@ class I3InferenceModule(DeploymentModule):
                 f"prediction columns have [{self.prediction_columns}]"
             )
             raise e
-
-        assert predictions.shape[0] == 1
         return dim
 
     def _create_dictionary(
         self, dim: int, predictions: np.ndarray
-    ) -> Dict[str, Any]:
+    ) -> [Dict[str, Any]]:
         """Transform predictions into a dictionary."""
-        data = {}
-        for i in range(dim):
-            try:
-                assert len(predictions[:, i]) == 1
-                data[self.model_name + "_" + self.prediction_columns[i]] = (
-                    I3Double(float(predictions[:, i][0]))
-                )
-            except IndexError:
-                data[self.model_name + "_" + self.prediction_columns[i]] = (
-                    I3Double(predictions[0])
-                )
-        return data
+        all_data = []
+        for row in predictions:
+            data = {}
+            for i in range(dim):
+                data[self.model_name + "_" + self.prediction_columns[i]] = I3Double(float(row[i]))
+            all_data.append(data)
+        return all_data
 
     def _apply_model(self, data: Data) -> np.ndarray:
         """Apply model to `Data` and case-handling."""
@@ -150,17 +143,21 @@ class I3InferenceModule(DeploymentModule):
             ).reshape(-1, len(self.prediction_columns))
         return predictions
 
-    def _create_data_representation(self, frame: I3Frame) -> Data:
+    def _create_data_representation(self, frame_cache: [I3Frame]) -> Data:
         """Process Physics I3Frame into graph."""
-        # Extract features
-        input_features = self._extract_feature_array_from_frame(frame)
-        # Prepare graph data
-        if len(input_features) > 0:
-            data = self._graph_definition(
-                input_features=input_features,
-                input_feature_names=self._features,
-            )
-            return Batch.from_data_list([data])
+        data_cache = []
+        for f in frame_cache:
+            # Extract features
+            input_features = self._extract_feature_array_from_frame(f)
+            # Prepare graph data
+            if len(input_features) > 0:
+                data = self._graph_definition(
+                    input_features=input_features,
+                    input_feature_names=self._features,
+                )
+                data_cache.append(data)
+        if data_cache:
+            return Batch.from_data_list(data_cache)
         else:
             return None
 
@@ -187,7 +184,7 @@ class I3InferenceModule(DeploymentModule):
                 )
         return features
 
-    def _add_to_frame(self, frame: I3Frame, data: Dict[str, Any]) -> I3Frame:
+    def _add_to_frame(self, frame_cache: [I3Frame], data_list: [Dict[str, Any]]) -> I3Frame:
         """Add every field in data to I3Frame.
 
         Arguments:
@@ -197,10 +194,12 @@ class I3InferenceModule(DeploymentModule):
         Returns:
             frame: Same I3Frame as input, but with the new entries
         """
-        assert isinstance(
-            data, dict
-        ), f"data must be of type dict. Got {type(data)}"
-        for key in data.keys():
-            if key not in frame:
-                frame.Put(key, data[key])
-        return frame
+        assert len(frame_cache) == len(data_list), (
+            f"Number of frames ({len(frame_cache)}) and data dictionaries ({len(data_list)}) must match"
+        )
+        for frame, data in zip(frame_cache, data_list):
+            assert isinstance(data, dict), f"Each data item must be dict, got {type(data)}"
+            for key, value in data.items():
+                if key not in frame:
+                    frame.Put(key, value)
+        return frame_cache
