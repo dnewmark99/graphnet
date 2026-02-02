@@ -82,8 +82,19 @@ class I3InferenceModule(DeploymentModule):
     def __call__(self, frame_cache: [I3Frame]) -> bool:
         """Write predictions from model to frame."""
         # inference
-        data = self._create_data_representation(frame_cache=frame_cache)
+        data, valid_mask = self._create_data_representation(frame_cache=frame_cache)
         predictions = self._apply_model(data=data)
+
+        ### reinsert dropped predictions
+        full_predictions = []
+        pred_idx = 0
+        for is_valid in valid_mask:
+            if is_valid:
+                full_predictions.append(predictions[pred_idx])
+                pred_idx += 1
+            else:
+                full_predictions.append(np.full(len(self.prediction_columns), np.nan))
+        predictions = np.vstack(full_predictions)
 
         # Check dimensions of predictions and prediction columns
         dim = self._check_dimensions(predictions=predictions)
@@ -146,20 +157,25 @@ class I3InferenceModule(DeploymentModule):
     def _create_data_representation(self, frame_cache: [I3Frame]) -> Data:
         """Process Physics I3Frame into graph."""
         data_cache = []
+        valid_mask = []
         for f in frame_cache:
             # Extract features
             input_features = self._extract_feature_array_from_frame(f)
             # Prepare graph data
-            if len(input_features) > 0:
+            if input_features is not None and len(input_features) > 0 :
                 data = self._graph_definition(
                     input_features=input_features,
                     input_feature_names=self._features,
                 )
                 data_cache.append(data)
+                valid_mask.append(True)
+            else:
+                valid_mask.append(False)
         if data_cache:
-            return Batch.from_data_list(data_cache)
+            batch = Batch.from_data_list(data_cache)
         else:
-            return None
+            batch = None
+        return batch, valid_mask
 
     def _extract_feature_array_from_frame(self, frame: I3Frame) -> np.array:
         """Apply the I3FeatureExtractors to the I3Frame.
@@ -173,6 +189,8 @@ class I3InferenceModule(DeploymentModule):
         features = None
         for i3extractor in self._i3_extractors:
             feature_dict = i3extractor(frame)
+            if feature_dict is None:
+                continue
             features_pulsemap = np.array(
                 [feature_dict[key] for key in self._features]
             ).T
